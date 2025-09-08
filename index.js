@@ -52,7 +52,7 @@ app.use((req, res, next) => {
     res.on('finish', () => {
         if (res.statusCode === 200 || res.statusCode === 304) {
             const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-            console.log(chalk.default.green(`Successful connection with ${ip}, requesting ${req.originalUrl}`));
+            console.log(chalk.default.green(`Code ${res.statusCode}, ${ip} requesting ${req.originalUrl}`));
         }
     });
     next();
