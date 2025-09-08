@@ -1,0 +1,10 @@
+# VSCode
+.vscode/
+
+# node-specific
+node_modules/
+package-lock.json
+
+# user-specific
+auth.json
+public/
