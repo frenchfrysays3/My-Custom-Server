@@ -20,8 +20,16 @@ app.use(express.urlencoded({ extended: true }));
 
 // Global maintenance mode middleware
 app.use((req, res, next) => {
-    // Allow status page or health check if needed
-    if (maintenance && req.originalUrl !== '/status') {
+    if (maintenance) {
+        // Allow essential static files and status page
+        if (
+            req.originalUrl === '/status' ||
+            req.originalUrl.startsWith('/css/style.css') ||
+            req.originalUrl.startsWith('/js/errors.js') ||
+            req.originalUrl.startsWith('/js/topnav.js')
+        ) {
+            return next();
+        }
         const errorPage = path.join(__dirname, "public", "errors", "50x.html");
         if (fs.existsSync(errorPage)) {
             return res.status(503).sendFile(errorPage);
