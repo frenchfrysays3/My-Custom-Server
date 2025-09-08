@@ -10,13 +10,22 @@ let maintenance = true;
 
 const express = require('express');
 const app = express();
+const cookieParser = require('cookie-parser');
 const session = require('express-session');
 const fs = require('fs');
 const path = require('path');
 const chalk = require('chalk');
 const { log } = require('console');
 // Middleware to parse POST bodies
+
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
+// Session setup (must be before routes that use sessions)
+app.use(session({
+    secret: 'your-secret-key',
+    resave: false,
+    saveUninitialized: false
+}));
 
 // Global maintenance mode middleware
 app.use((req, res, next) => {
