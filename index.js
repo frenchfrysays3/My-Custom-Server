@@ -6,6 +6,8 @@ process.on('uncaughtException:', (err) => {
     console.error('Uncaught Exception:', err);
 });
 
+let maintenance = true;
+
 const express = require('express');
 const app = express();
 const session = require('express-session');
@@ -15,6 +17,20 @@ const chalk = require('chalk');
 const { log } = require('console');
 // Middleware to parse POST bodies
 app.use(express.urlencoded({ extended: true }));
+
+// Global maintenance mode middleware
+app.use((req, res, next) => {
+    // Allow status page or health check if needed
+    if (maintenance && req.originalUrl !== '/status') {
+        const errorPage = path.join(__dirname, "public", "errors", "50x.html");
+        if (fs.existsSync(errorPage)) {
+            return res.status(503).sendFile(errorPage);
+        } else {
+            return res.status(503).send('<h1>Server is down for maintenance</h1>');
+        }
+    }
+    next();
+});
 
 app.use((err, req, res, next) => {
     console.log(chalk.default.red("Global error handler:", err));
@@ -50,10 +66,8 @@ let error50x = ``;
 
 app.use((req, res, next) => {
     res.on('finish', () => {
-        if (res.statusCode === 200 || res.statusCode === 304) {
-            const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-            console.log(chalk.default.green(`Code ${res.statusCode}, ${ip} requesting ${req.originalUrl}`));
-        }
+        const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+        console.log(chalk.default.greenBright(`Code ${res.statusCode}, ${ip} requesting ${req.originalUrl}`));
     });
     next();
 });
@@ -89,44 +103,56 @@ try {
 
 // Login form (GET)
 app.get('/login', (req, res) => {
-    const error = req.query.error ? '<p style="color:red">Invalid credentials</p>' : '';
-    const loggedIn = req.session && req.session.authenticated;
-    const logoutLink = loggedIn ? '<p><a href="/private/logout">Logout</a></p>' : '';
-    res.send(`
-        <html><body>
-        <h2>Login</h2>
-        ${error}
-        ${logoutLink}
-        <form method="POST" action="/login">
-            <input name="username" placeholder="Username" required><br>
-            <input name="password" type="password" placeholder="Password" required><br>
-            <button type="submit">Login</button>
-        </form>
-        </body></html>
-    `);
+    if (maintenance == false) {
+        const error = req.query.error ? '<p style="color:red">Invalid credentials</p>' : '';
+        const loggedIn = req.session && req.session.authenticated;
+        const logoutLink = loggedIn ? '<p><a href="/private/logout">Logout</a></p>' : '';
+        res.send(`
+            <html><body>
+            <h2>Login</h2>
+            ${error}
+            ${logoutLink}
+            <form method="POST" action="/login">
+                <input name="username" placeholder="Username" required><br>
+                <input name="password" type="password" placeholder="Password" required><br>
+                <button type="submit">Login</button>
+            </form>
+            </body></html>
+        `);
+    } else {
+        res.redirect(301, '/');
+    }
 });
 
 // Logout route
 app.get('/logout', (req, res) => {
-    req.session.destroy(() => {
-        res.redirect('/login');
-    });
+    if (maintenance == false) {
+        req.session.destroy(() => {
+            res.redirect('/login');
+        });
+    } else {
+        res.redirect('/');
+    }
 });
 
 // Login form (POST)
 app.post('/login', (req, res) => {
-    const { username, password } = req.body;
-    console.log('DEBUG: Submitted username:', username);
-    console.log('DEBUG: Submitted password:', password);
-    console.log('DEBUG: Expected password for', username, ':', users[username]);
-    if (users[username] && users[username] === password) {
-        req.session.authenticated = true;
-        req.session.username = username;
-        console.log('DEBUG: Successful login attempt for', username);
-        return res.redirect(req.originalUrl);
+    if (maintenance == false) {
+        const { username, password } = req.body;
+        console.log('DEBUG: Submitted username:', username);
+        console.log('DEBUG: Submitted password:', password);
+        console.log('DEBUG: Expected password for', username, ':', users[username]);
+        if (users[username] && users[username] === password) {
+            req.session.authenticated = true;
+            req.session.username = username;
+            console.log('DEBUG: Successful login attempt for', username);
+            return res.redirect(req.originalUrl);
+        }
+        res.redirect('/private/login?error=1');
+        console.debug(chalk.default.red('DEBUG: Failed login attempt for', username, 'requesting', req.originalUrl));
+    } else {
+        res.redirect('/')
     }
-    res.redirect('/private/login?error=1');
-    console.debug(chalk.default.red('DEBUG: Failed login attempt for', username, 'requesting', req.originalUrl));
 });
 
 // Middleware to protect /private
