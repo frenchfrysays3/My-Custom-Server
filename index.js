@@ -6,7 +6,7 @@ process.on('uncaughtException:', (err) => {
     console.error('Uncaught Exception:', err);
 });
 
-let maintenance = true;
+let maintenance = false; // Set to true to enable maintenance mode
 
 const express = require('express');
 const app = express();
@@ -16,7 +16,11 @@ const fs = require('fs');
 const path = require('path');
 const chalk = require('chalk');
 const { log } = require('console');
-// Middleware to parse POST bodies
+
+// See if the path is /status, and if it is, send a status code of 200 and send the status.html file as a file response
+app.use('/status', (req, res) => {
+    res.statusCode(200).sendFile(path.join(__dirname, 'public', 'status.html'))
+});
 
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
@@ -27,15 +31,23 @@ app.use(session({
     saveUninitialized: false
 }));
 
+// Endpoint to get current logged-in username
+app.get('/me', (req, res) => {
+    if (req.session && req.session.authenticated) {
+        res.json({ username: req.session.username });
+    } else {
+        res.status(401).json({ error: 'Not authenticated' });
+    }
+});
+
 // Global maintenance mode middleware
 app.use((req, res, next) => {
     if (maintenance) {
         // Allow essential static files and status page
         if (
             req.originalUrl === '/status' ||
-            req.originalUrl.startsWith('/css/style.css') ||
-            req.originalUrl.startsWith('/js/errors.js') ||
-            req.originalUrl.startsWith('/js/topnav.js')
+            req.originalUrl.startsWith('/css/') ||
+            req.originalUrl.startsWith('/js/')
         ) {
             return next();
         }
@@ -55,13 +67,6 @@ app.use((err, req, res, next) => {
         res.status(500).send("<h1>Internal Server Error</h1>");
     }
 });
-
-// Session setup
-app.use(session({
-    secret: 'your-secret-key',
-    resave: false,
-    saveUninitialized: false
-}));
 
 // Error pages
 let error404html = `<!DOCTYPE html>
@@ -189,6 +194,117 @@ app.use('/private', (req, res, next) => {
 }, express.static(path.join(__dirname, 'public/private'), { extensions: ['html'] }));
 
 // Define ports to try
+// --- User Profile CRUD API ---
+const profilesPath = path.join(__dirname, 'profiles.json');
+
+function readProfiles() {
+    try {
+        return JSON.parse(fs.readFileSync(profilesPath, 'utf-8'));
+    } catch (e) {
+        return [];
+    }
+}
+
+function writeProfiles(profiles) {
+    fs.writeFileSync(profilesPath, JSON.stringify(profiles, null, 2), 'utf-8');
+}
+
+// Get all profiles
+app.get('/profiles', (req, res) => {
+    res.json(readProfiles());
+});
+
+// Get a single profile by id
+app.get('/profiles/:id', (req, res) => {
+    const profiles = readProfiles();
+    const profile = profiles.find(p => p.id === req.params.id);
+    if (!profile) return res.status(404).json({ error: 'Profile not found' });
+    res.json(profile);
+});
+
+
+// Create a new profile (only for logged-in user, or via signup)
+app.post('/profiles', express.json(), (req, res) => {
+    if (!req.session || !req.session.authenticated) {
+        return res.status(401).json({ error: 'Not authenticated' });
+    }
+    const profiles = readProfiles();
+    const { name, email, bio } = req.body;
+    if (!name || !email) return res.status(400).json({ error: 'Name and email required' });
+    // Only allow one profile per user
+    if (profiles.some(p => p.owner === req.session.username)) {
+        return res.status(400).json({ error: 'Profile already exists for this user' });
+    }
+    const id = Date.now().toString();
+    const newProfile = { id, name, email, bio: bio || '', owner: req.session.username };
+    profiles.push(newProfile);
+    writeProfiles(profiles);
+    res.status(201).json(newProfile);
+});
+
+// Update a profile (only owner can edit)
+app.put('/profiles/:id', express.json(), (req, res) => {
+    if (!req.session || !req.session.authenticated) {
+        return res.status(401).json({ error: 'Not authenticated' });
+    }
+    const profiles = readProfiles();
+    const idx = profiles.findIndex(p => p.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: 'Profile not found' });
+    if (profiles[idx].owner !== req.session.username) {
+        return res.status(403).json({ error: 'Forbidden: not your profile' });
+    }
+    const { name, email, bio } = req.body;
+    if (!name || !email) return res.status(400).json({ error: 'Name and email required' });
+    profiles[idx] = { ...profiles[idx], name, email, bio: bio || '' };
+    writeProfiles(profiles);
+    res.json(profiles[idx]);
+});
+
+// Delete a profile (only owner can delete)
+app.delete('/profiles/:id', (req, res) => {
+    if (!req.session || !req.session.authenticated) {
+        return res.status(401).json({ error: 'Not authenticated' });
+    }
+    let profiles = readProfiles();
+    const idx = profiles.findIndex(p => p.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: 'Profile not found' });
+    if (profiles[idx].owner !== req.session.username) {
+        return res.status(403).json({ error: 'Forbidden: not your profile' });
+    }
+    const deleted = profiles.splice(idx, 1)[0];
+    writeProfiles(profiles);
+    res.json(deleted);
+});
+// Signup route: create user and default profile
+app.post('/signup', express.json(), (req, res) => {
+    const { username, password, name, email } = req.body;
+    if (!username || !password || !name || !email) {
+        return res.status(400).json({ error: 'All fields required' });
+    }
+    // Check if user exists
+    let usersData = {};
+    try {
+        usersData = JSON.parse(fs.readFileSync(path.join(__dirname, 'auth.json'), 'utf-8'));
+    } catch (e) {}
+    if (usersData[username]) {
+        return res.status(400).json({ error: 'User already exists' });
+    }
+    // Add user
+    usersData[username] = password;
+    fs.writeFileSync(path.join(__dirname, 'auth.json'), JSON.stringify(usersData, null, 2), 'utf-8');
+    // Add default profile, but only if one does not already exist for this user
+    const profiles = readProfiles();
+    if (profiles.some(p => p.owner === username)) {
+        return res.status(400).json({ error: 'Profile already exists for this user' });
+    }
+    const id = Date.now().toString();
+    const newProfile = { id, name, email, bio: '', owner: username };
+    profiles.push(newProfile);
+    writeProfiles(profiles);
+    res.status(201).json({ message: 'Signup successful', username });
+});
+// --- End User Profile CRUD API ---
+
 const ports = [
     3000,
     8080,
