@@ -1,9 +1,13 @@
+
 process.on('unhandledRejection', (reason, promise) => {
     console.error('Unhandled Rejection:', reason);
+    logger.error(`Unhandled Rejection: ${reason}`);
 });
+
 
 process.on('uncaughtException:', (err) => {
     console.error('Uncaught Exception:', err);
+    logger.error(`Uncaught Exception: ${err}`);
 });
 
 let maintenance = false; // Set to true to enable maintenance mode
@@ -16,6 +20,24 @@ const fs = require('fs');
 const path = require('path');
 const chalk = require('chalk');
 const { log } = require('console');
+const winston = require('winston');
+
+// winstion setup
+if (!fs.existsSync('logs')) {
+    fs.mkdirSync('logs');
+}
+
+const logFileName = `logs/server-${new Date().toISOString().replace(/[:.]/g, '-')}.log`
+const logger = winston.createLogger({
+    level: 'info',
+    format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.simple()
+    ),
+    transports: [
+        new winston.transports.File({ filename: logFileName })
+    ]
+});
 
 // See if the path is /status, and if it is, send a status code of 200 and send the status.html file as a file response
 app.use('/status', (req, res) => {
@@ -63,6 +85,7 @@ app.use((req, res, next) => {
 
 app.use((err, req, res, next) => {
     console.log(chalk.default.red("Global error handler:", err));
+    logger.error(`Global error handler: ${err}`);
     if (!res.headersSent) {
         res.status(500).send("<h1>Internal Server Error</h1>");
     }
@@ -90,6 +113,7 @@ app.use((req, res, next) => {
     res.on('finish', () => {
         const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
         console.log(chalk.default.greenBright(`Code ${res.statusCode}, ${ip} requesting ${req.originalUrl}`));
+        logger.info(`Code ${res.statusCode}, ${ip} requesting ${req.originalUrl}`);
     });
     next();
 });
@@ -105,6 +129,7 @@ app.get('/', (req, res, next) => {
     res.status(200).sendFile(path.join(__dirname, "public", "index.html"));
 
     console.log(chalk.default.yellow(`Successful connection with ${ip}, requesting ${req.originalUrl}`));
+    logger.info(`Successful connection with ${ip}, requesting ${req.originalUrl}`);
 });
 
 // Get Users
@@ -161,17 +186,22 @@ app.get('/logout', (req, res) => {
 app.post('/login', (req, res) => {
     if (maintenance == false) {
         const { username, password } = req.body;
-        console.log('DEBUG: Submitted username:', username);
-        console.log('DEBUG: Submitted password:', password);
-        console.log('DEBUG: Expected password for', username, ':', users[username]);
+    console.log('DEBUG: Submitted username:', username);
+    logger.info(`DEBUG: Submitted username: ${username}`);
+    console.log('DEBUG: Submitted password:', password);
+    logger.info(`DEBUG: Submitted password: ${password}`);
+    console.log('DEBUG: Expected password for', username, ':', users[username]);
+    logger.info(`DEBUG: Expected password for ${username}: ${users[username]}`);
         if (users[username] && users[username] === password) {
             req.session.authenticated = true;
             req.session.username = username;
             console.log('DEBUG: Successful login attempt for', username);
+            logger.info(`DEBUG: Successful login attempt for ${username}`);
             return res.redirect(req.originalUrl);
         }
         res.redirect('/private/login?error=1');
-        console.debug(chalk.default.red('DEBUG: Failed login attempt for', username, 'requesting', req.originalUrl));
+    console.debug(chalk.default.red('DEBUG: Failed login attempt for', username, 'requesting', req.originalUrl));
+    logger.warn(`DEBUG: Failed login attempt for ${username} requesting ${req.originalUrl}`);
     } else {
         res.redirect('/')
     }
@@ -181,15 +211,18 @@ app.post('/login', (req, res) => {
 app.use('/private', (req, res, next) => {
     if (req.session && req.session.authenticated) {
         console.log('DEBUG: Authenticated session for', req.session.username, 'requesting', req.originalUrl);
+        logger.info(`DEBUG: Authenticated session for ${req.session.username} requesting ${req.originalUrl}`);
         return next();
     }
     console.log(chalk.default.yellowBright(`DEBUG: Not authenticated, redirecting to /private/login for ${req.originalUrl}`));
+    logger.warn(`DEBUG: Not authenticated, redirecting to /private/login for ${req.originalUrl}`);
     res.redirect('/private/login');
 });
 
 // Serve private static files with debug and .html extension fallback
 app.use('/private', (req, res, next) => {
     console.log(chalk.default.yellowBright(`DEBUG: Static file middleware for ${req.originalUrl}`));
+    logger.info(`DEBUG: Static file middleware for ${req.originalUrl}`);
     next();
 }, express.static(path.join(__dirname, 'public/private'), { extensions: ['html'] }));
 
@@ -330,15 +363,18 @@ console.log(chalk.default.blue("Starting server..."));
 
 function tryListen(ports, idx = 0) {
     if (idx >= ports.length) {
-        console.error(chalk.default.red("All ports failed. Server could not start."));
+    console.error(chalk.default.red("All ports failed. Server could not start."));
+    logger.error("All ports failed. Server could not start.");
         return;
     }
     app.listen(ports[idx], (err) => {
         if (err) {
             console.log(chalk.default.red(`Error starting server on port ${ports[idx]}: ${err}`));
+            logger.error(`Error starting server on port ${ports[idx]}: ${err}`);
             tryListen(ports, idx + 1);
         } else {
             console.log(chalk.default.green(`Server listening on localhost:${ports[idx]}`));
+            logger.info(`Server listening on localhost:${ports[idx]}`);
         }
     });
 }
@@ -355,6 +391,7 @@ app.use((req, res) => {
         res.status(404).send(error404html || '<h1>404 Page Not Found</h1>');
     }
     console.log(chalk.default.yellow(`Error 404 when IP ${ip} requests ${req.originalUrl}`));
+    logger.warn(`Error 404 when IP ${ip} requests ${req.originalUrl}`);
 });
 
 tryListen(ports);

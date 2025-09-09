@@ -16,7 +16,8 @@
     "cookie-parser": "^1.4.7",
     "express": "^5.1.0",
     "express-session": "^1.0.0",
-    "uid2": "^1.0.0"
+    "uid2": "^1.0.0",
+    "winston": "^3.17.0"
   },
   "engines": {
     "node": "v22.14.0"

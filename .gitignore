@@ -7,5 +7,6 @@ package-lock.json
 
 # user-specific
 auth.json
-public/
+public/*
 profiles.json
+logs/*
