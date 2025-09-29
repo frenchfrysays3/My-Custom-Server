@@ -1,0 +1,13 @@
+# Usernames and passwords
+auth.json
+
+# Node stuff
+package-lock.json
+node_modules/
+
+# other stuff
+logs/
+public/
+
+# VSCode
+.vscode/
